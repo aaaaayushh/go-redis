@@ -1,4 +1,4 @@
-package main
+package resp
 
 import (
 	"bufio"
@@ -22,6 +22,7 @@ type Value struct {
 	bulk     string  // bulk string value
 	err      string  // simple error string value
 	array    []Value // array value
+	isNull   bool
 }
 
 type Deserializer struct {
@@ -31,8 +32,8 @@ type Serializer struct {
 	writer *bufio.Writer
 }
 
-func appendCRLF(data []byte) {
-	data = append(data, '\r', '\n')
+func appendCRLF(data []byte) []byte {
+	return append(data, '\r', '\n')
 }
 
 func NewDeserializer(r io.Reader) *Deserializer {
@@ -77,6 +78,14 @@ func (d *Deserializer) readBulk() (Value, error) {
 	if err != nil {
 		return v, err
 	}
+
+	// handle NULL
+	if strLen == -1 {
+		v.isNull = true
+		v.DataType = "NULL"
+		return v, nil
+	}
+
 	bulkString := make([]byte, strLen)
 	_, err = d.reader.Read(bulkString)
 	if err != nil {
@@ -172,7 +181,7 @@ func (d *Deserializer) Read() (Value, error) {
 	case INTEGER:
 		return d.readInteger()
 	case ERROR:
-		return Value{}, nil
+		return d.readError()
 	case BULK:
 		return d.readBulk()
 	case ARRAY:
@@ -204,7 +213,7 @@ func (v Value) serializeError() []byte {
 	var bytes []byte
 	bytes = append(bytes, ERROR)
 	bytes = append(bytes, v.err...)
-	appendCRLF(bytes)
+	bytes = appendCRLF(bytes)
 	return bytes
 }
 func (v Value) serializeNull() []byte {
@@ -214,7 +223,7 @@ func (v Value) serializeString() []byte {
 	var bytes []byte
 	bytes = append(bytes, STRING)
 	bytes = append(bytes, v.str...)
-	appendCRLF(bytes)
+	bytes = appendCRLF(bytes)
 	return bytes
 }
 func (v Value) serializeArray() []byte {
@@ -222,7 +231,7 @@ func (v Value) serializeArray() []byte {
 	length := len(v.array)
 	bytes = append(bytes, ARRAY)
 	bytes = append(bytes, strconv.Itoa(length)...)
-	appendCRLF(bytes)
+	bytes = appendCRLF(bytes)
 	for _, val := range v.array {
 		bytes = append(bytes, val.Serialize()...)
 	}
@@ -233,9 +242,9 @@ func (v Value) serializeBulkString() []byte {
 	length := len(v.bulk)
 	bytes = append(bytes, BULK)
 	bytes = append(bytes, strconv.Itoa(length)...)
-	appendCRLF(bytes)
+	bytes = appendCRLF(bytes)
 	bytes = append(bytes, v.bulk...)
-	appendCRLF(bytes)
+	bytes = appendCRLF(bytes)
 	return bytes
 }
 func (v Value) serializeInteger() []byte {
@@ -243,10 +252,8 @@ func (v Value) serializeInteger() []byte {
 	bytes = append(bytes, INTEGER)
 	if v.num > 0 {
 		bytes = append(bytes, '+')
-	} else if v.num < 0 {
-		bytes = append(bytes, '-')
 	}
 	bytes = append(bytes, strconv.Itoa(v.num)...)
-	appendCRLF(bytes)
+	bytes = appendCRLF(bytes)
 	return bytes
 }

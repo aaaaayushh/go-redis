@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go-redis/pkg/resp"
 	"log"
 	"net"
 )
@@ -20,7 +21,7 @@ func main() {
 	}
 	defer conn.Close()
 	for {
-		deserializer := NewDeserializer(conn)
+		deserializer := resp.NewDeserializer(conn)
 		v, err := deserializer.Read()
 		if err != nil {
 			log.Panicln(err)
