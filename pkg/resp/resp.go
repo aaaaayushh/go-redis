@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"log"
 	"strconv"
 )
 
@@ -15,21 +16,32 @@ const (
 	ARRAY   = '*'
 )
 
+type DataType int
+
+const (
+	TypeString DataType = iota
+	TypeError
+	TypeInteger
+	TypeBulk
+	TypeArray
+	TypeNull
+)
+
 type Value struct {
-	DataType string
-	str      string  // simple string value
-	num      int     // integer value
-	bulk     string  // bulk string value
-	err      string  // simple error string value
-	array    []Value // array value
-	isNull   bool
+	DataType DataType
+	Str      string  // simple string value
+	Num      int     // integer value
+	Bulk     string  // bulk string value
+	Err      string  // simple error string value
+	Array    []Value // array value
+	IsNull   bool
 }
 
 type Deserializer struct {
 	reader *bufio.Reader
 }
 type Serializer struct {
-	writer *bufio.Writer
+	writer io.Writer
 }
 
 func appendCRLF(data []byte) []byte {
@@ -72,7 +84,7 @@ func (d *Deserializer) readIntegerInLine() (num int, numBytes int, err error) {
 }
 func (d *Deserializer) readBulk() (Value, error) {
 	v := Value{}
-	v.DataType = "BULK"
+	v.DataType = TypeBulk
 
 	strLen, _, err := d.readIntegerInLine()
 	if err != nil {
@@ -81,8 +93,8 @@ func (d *Deserializer) readBulk() (Value, error) {
 
 	// handle NULL
 	if strLen == -1 {
-		v.isNull = true
-		v.DataType = "NULL"
+		v.IsNull = true
+		v.DataType = TypeNull
 		return v, nil
 	}
 
@@ -91,7 +103,7 @@ func (d *Deserializer) readBulk() (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	v.bulk = string(bulkString)
+	v.Bulk = string(bulkString)
 
 	// read the trailing CRLF
 	_, _, err = d.readLine()
@@ -102,38 +114,45 @@ func (d *Deserializer) readBulk() (Value, error) {
 }
 func (d *Deserializer) readArray() (Value, error) {
 	v := Value{}
-	v.DataType = "ARRAY"
+	v.DataType = TypeArray
 
 	// get the length of the array
 	arrLen, _, err := d.readIntegerInLine()
 	if err != nil {
 		return v, err
 	}
+
+	// handle NULL
+	if arrLen == -1 {
+		v.IsNull = true
+		v.DataType = TypeNull
+		return v, nil
+	}
 	// allocate a slice of arrLen
-	v.array = make([]Value, arrLen)
+	v.Array = make([]Value, arrLen)
 	// read each subsequent entry of the array and insert it into Value[]
 	for i := 0; i < arrLen; i++ {
 		val, err := d.Read()
 		if err != nil {
 			return v, err
 		}
-		v.array[i] = val
+		v.Array[i] = val
 	}
 	return v, nil
 }
 func (d *Deserializer) readSimpleString() (Value, error) {
 	v := Value{}
-	v.DataType = "STRING"
+	v.DataType = TypeString
 	lineData, _, err := d.readLine()
 	if err != nil {
 		return v, err
 	}
-	v.str = string(lineData)
+	v.Str = string(lineData)
 	return v, nil
 }
 func (d *Deserializer) readInteger() (Value, error) {
 	v := Value{}
-	v.DataType = "INTEGER"
+	v.DataType = TypeInteger
 	line, _, err := d.readLine()
 	if err != nil {
 		return v, err
@@ -157,17 +176,17 @@ func (d *Deserializer) readInteger() (Value, error) {
 		return v, err
 	}
 
-	v.num = sign * num
+	v.Num = sign * num
 	return v, nil
 }
 func (d *Deserializer) readError() (Value, error) {
 	v := Value{}
-	v.DataType = "ERROR"
+	v.DataType = TypeError
 	errorMsg, _, err := d.readLine()
 	if err != nil {
 		return v, err
 	}
-	v.err = string(errorMsg)
+	v.Err = string(errorMsg)
 	return v, nil
 }
 func (d *Deserializer) Read() (Value, error) {
@@ -193,17 +212,17 @@ func (d *Deserializer) Read() (Value, error) {
 
 func (v Value) Serialize() []byte {
 	switch v.DataType {
-	case "ARRAY":
+	case TypeArray:
 		return v.serializeArray()
-	case "BULK":
+	case TypeBulk:
 		return v.serializeBulkString()
-	case "STRING":
+	case TypeString:
 		return v.serializeString()
-	case "INTEGER":
+	case TypeInteger:
 		return v.serializeInteger()
-	case "ERROR":
+	case TypeError:
 		return v.serializeError()
-	case "NULL":
+	case TypeNull:
 		return v.serializeNull()
 	default:
 		return []byte{}
@@ -212,7 +231,7 @@ func (v Value) Serialize() []byte {
 func (v Value) serializeError() []byte {
 	var bytes []byte
 	bytes = append(bytes, ERROR)
-	bytes = append(bytes, v.err...)
+	bytes = append(bytes, v.Err...)
 	bytes = appendCRLF(bytes)
 	return bytes
 }
@@ -222,38 +241,50 @@ func (v Value) serializeNull() []byte {
 func (v Value) serializeString() []byte {
 	var bytes []byte
 	bytes = append(bytes, STRING)
-	bytes = append(bytes, v.str...)
+	bytes = append(bytes, v.Str...)
 	bytes = appendCRLF(bytes)
 	return bytes
 }
 func (v Value) serializeArray() []byte {
 	var bytes []byte
-	length := len(v.array)
+	length := len(v.Array)
 	bytes = append(bytes, ARRAY)
 	bytes = append(bytes, strconv.Itoa(length)...)
 	bytes = appendCRLF(bytes)
-	for _, val := range v.array {
+	for _, val := range v.Array {
 		bytes = append(bytes, val.Serialize()...)
 	}
 	return bytes
 }
 func (v Value) serializeBulkString() []byte {
 	var bytes []byte
-	length := len(v.bulk)
+	length := len(v.Bulk)
 	bytes = append(bytes, BULK)
 	bytes = append(bytes, strconv.Itoa(length)...)
 	bytes = appendCRLF(bytes)
-	bytes = append(bytes, v.bulk...)
+	bytes = append(bytes, v.Bulk...)
 	bytes = appendCRLF(bytes)
 	return bytes
 }
 func (v Value) serializeInteger() []byte {
 	var bytes []byte
 	bytes = append(bytes, INTEGER)
-	if v.num > 0 {
+	if v.Num > 0 {
 		bytes = append(bytes, '+')
 	}
-	bytes = append(bytes, strconv.Itoa(v.num)...)
+	bytes = append(bytes, strconv.Itoa(v.Num)...)
 	bytes = appendCRLF(bytes)
 	return bytes
+}
+func (s *Serializer) Write(v Value) error {
+	var bytes = v.Serialize()
+	_, err := s.writer.Write(bytes)
+	if f, ok := s.writer.(interface{ Flush() error }); ok {
+		return f.Flush()
+	}
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
 }
