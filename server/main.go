@@ -45,7 +45,6 @@ func handleConnection(conn net.Conn) {
 		handler, ok := commands.CommandHandler[command]
 		if !ok {
 			log.Println("Invalid command:", command)
-			//err := serializer.Write(resp.Value{DataType: resp.TypeError, Err: "ERR unknown command"})
 			if err != nil {
 				log.Println("Error writing response:", err)
 			}
