@@ -21,6 +21,8 @@ func handleSet(args []resp.Value) resp.Value {
 	var nx, xx bool
 	var ex int64 = -1
 	var px int64 = -1
+	var exat int64 = -1
+	var pxat int64 = -1
 	var err error
 
 	for i := 2; i < len(args); i++ {
@@ -52,6 +54,26 @@ func handleSet(args []resp.Value) resp.Value {
 			}
 			i++
 			break
+		case "EXAT":
+			if i+1 >= len(args) {
+				return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'set' command"}
+			}
+			exat, err = strconv.ParseInt(args[i+1].Bulk, 10, 64)
+			if err != nil {
+				return resp.Value{DataType: resp.TypeError, Err: "Value is not an Integer"}
+			}
+			i++
+			break
+		case "PXAT":
+			if i+1 >= len(args) {
+				return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'set' command"}
+			}
+			pxat, err = strconv.ParseInt(args[i+1].Bulk, 10, 64)
+			if err != nil {
+				return resp.Value{DataType: resp.TypeError, Err: "Value is not an Integer"}
+			}
+			i++
+			break
 		default:
 			return resp.Value{DataType: resp.TypeError, Err: "ERR syntax error"}
 		}
@@ -68,13 +90,20 @@ func handleSet(args []resp.Value) resp.Value {
 	}
 	record := Record{Value: value}
 
-	if ex > 0 && px > 0 {
-		return resp.Value{DataType: resp.TypeError, Err: "ERR syntax error"}
-	} else if ex > 0 {
+	if ex > 0 {
 		expirationTime := time.Now().Add(time.Duration(ex) * time.Second)
 		record.ExpiryTime = &expirationTime
 	} else if px > 0 {
 		expirationTime := time.Now().Add(time.Duration(px) * time.Millisecond)
+		record.ExpiryTime = &expirationTime
+	} else if exat > 0 {
+		expirationTime := time.Unix(exat, 0)
+		record.ExpiryTime = &expirationTime
+	} else if pxat > 0 {
+		secs := pxat / 1000
+		nsecs := (pxat % 1000) * 1000000
+
+		expirationTime := time.Unix(secs, nsecs)
 		record.ExpiryTime = &expirationTime
 	}
 	dataSet[key] = record
