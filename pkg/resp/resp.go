@@ -269,9 +269,6 @@ func (v Value) serializeBulkString() []byte {
 func (v Value) serializeInteger() []byte {
 	var bytes []byte
 	bytes = append(bytes, INTEGER)
-	//if v.Num > 0 {
-	//	bytes = append(bytes, '+')
-	//}
 	bytes = append(bytes, strconv.Itoa(v.Num)...)
 	bytes = appendCRLF(bytes)
 	return bytes
