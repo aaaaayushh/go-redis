@@ -1,132 +1,136 @@
 package commands
 
 import (
+	"errors"
+	"fmt"
 	"go-redis/pkg/resp"
 	"strconv"
 	"sync"
 	"time"
 )
 
+const (
+	errWrongArgsCount = "ERR wrong number of arguments for '%s' command"
+	errSyntax         = "ERR syntax error"
+	errNotInteger     = "ERR value is not an integer or out of range"
+	okResponse        = "OK"
+)
+
 type Record struct {
 	Value      string
 	ExpiryTime *time.Time
 }
+type SetOptions struct {
+	NX   bool
+	XX   bool
+	EX   int64
+	PX   int64
+	EXAT int64
+	PXAT int64
+}
 
-var dataSet = map[string]Record{}
-var setMutex = sync.RWMutex{}
+var dataSet sync.Map
 
-func handleSet(args []resp.Value) resp.Value {
-	key := args[0].Bulk
-	value := args[1].Bulk
-	var nx, xx bool
-	var ex int64 = -1
-	var px int64 = -1
-	var exat int64 = -1
-	var pxat int64 = -1
-	var err error
+func parseSetOptions(args []resp.Value) (SetOptions, error) {
+	opts := SetOptions{
+		EX:   -1,
+		PX:   -1,
+		EXAT: -1,
+		PXAT: -1,
+	}
+	var timeOptionSet = false
 
 	for i := 2; i < len(args); i++ {
 		arg := args[i].Bulk
 		switch arg {
 		case "NX":
-			nx = true
-			break
+			opts.NX = true
 		case "XX":
-			xx = true
-			break
-		case "EX":
+			opts.XX = true
+		case "EX", "PX", "EXAT", "PXAT":
+			if timeOptionSet {
+				return opts, errors.New("only one time-based option (EX, PX, EXAT, PXAT) can be set")
+			}
 			if i+1 >= len(args) {
-				return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'set' command"}
+				return opts, errors.New(fmt.Sprintf(errWrongArgsCount, "set"))
 			}
-			ex, err = strconv.ParseInt(args[i+1].Bulk, 10, 64)
+			value, err := strconv.ParseInt(args[i+1].Bulk, 10, 64)
 			if err != nil {
-				return resp.Value{DataType: resp.TypeError, Err: "Value is not an Integer or is out of range"}
+				return opts, errors.New(errNotInteger)
 			}
+			switch arg {
+			case "EX":
+				opts.EX = value
+			case "PX":
+				opts.PX = value
+			case "EXAT":
+				opts.EXAT = value
+			case "PXAT":
+				opts.PXAT = value
+			}
+			timeOptionSet = true
 			i++
-			break
-		case "PX":
-			if i+1 >= len(args) {
-				return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'set' command"}
-			}
-			px, err = strconv.ParseInt(args[i+1].Bulk, 10, 64)
-			if err != nil {
-				return resp.Value{DataType: resp.TypeError, Err: "Value is not an Integer or is out of range"}
-			}
-			i++
-			break
-		case "EXAT":
-			if i+1 >= len(args) {
-				return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'set' command"}
-			}
-			exat, err = strconv.ParseInt(args[i+1].Bulk, 10, 64)
-			if err != nil {
-				return resp.Value{DataType: resp.TypeError, Err: "Value is not an Integer"}
-			}
-			i++
-			break
-		case "PXAT":
-			if i+1 >= len(args) {
-				return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'set' command"}
-			}
-			pxat, err = strconv.ParseInt(args[i+1].Bulk, 10, 64)
-			if err != nil {
-				return resp.Value{DataType: resp.TypeError, Err: "Value is not an Integer"}
-			}
-			i++
-			break
 		default:
-			return resp.Value{DataType: resp.TypeError, Err: "ERR syntax error"}
+			return opts, errors.New(errSyntax)
 		}
 	}
-	setMutex.Lock()
-	defer setMutex.Unlock()
+	return opts, nil
+}
 
-	exists := false
-	if _, ok := dataSet[key]; ok {
-		exists = true
+func handleSet(args []resp.Value) resp.Value {
+	if len(args) < 2 {
+		return resp.Value{DataType: resp.TypeError, Err: errWrongArgsCount}
 	}
-	if (nx && exists) || (xx && !exists) {
-		return resp.Value{DataType: resp.TypeNull, IsNull: true}
+
+	key := args[0].Bulk
+	value := args[1].Bulk
+
+	opts, err := parseSetOptions(args)
+	if err != nil {
+		return resp.Value{DataType: resp.TypeError, Err: err.Error()}
 	}
+
 	record := Record{Value: value}
 
-	if ex > 0 {
-		expirationTime := time.Now().Add(time.Duration(ex) * time.Second)
+	if opts.EX > 0 {
+		expirationTime := time.Now().Add(time.Duration(opts.EX) * time.Second)
 		record.ExpiryTime = &expirationTime
-	} else if px > 0 {
-		expirationTime := time.Now().Add(time.Duration(px) * time.Millisecond)
+	} else if opts.PX > 0 {
+		expirationTime := time.Now().Add(time.Duration(opts.PX) * time.Millisecond)
 		record.ExpiryTime = &expirationTime
-	} else if exat > 0 {
-		expirationTime := time.Unix(exat, 0)
+	} else if opts.EXAT > 0 {
+		expirationTime := time.Unix(opts.EXAT, 0)
 		record.ExpiryTime = &expirationTime
-	} else if pxat > 0 {
-		secs := pxat / 1000
-		nsecs := (pxat % 1000) * 1000000
-
+	} else if opts.PXAT > 0 {
+		secs := opts.PXAT / 1000
+		nsecs := (opts.PXAT % 1000) * 1000000
 		expirationTime := time.Unix(secs, nsecs)
 		record.ExpiryTime = &expirationTime
 	}
-	dataSet[key] = record
 
-	return resp.Value{DataType: resp.TypeString, Str: "OK"}
+	_, exists := dataSet.Load(key)
+	if (opts.NX && exists) || (opts.XX && !exists) {
+		return resp.Value{DataType: resp.TypeNull, IsNull: true}
+	}
+
+	dataSet.Store(key, record)
+	return resp.Value{DataType: resp.TypeString, Str: okResponse}
 }
+
 func handleGet(args []resp.Value) resp.Value {
 	if len(args) != 1 {
-		return resp.Value{DataType: resp.TypeError, Err: "ERR wrong number of arguments for 'get' command"}
+		return resp.Value{DataType: resp.TypeError, Err: errWrongArgsCount}
 	}
 	key := args[0].Bulk
-	setMutex.RLock()
-	record, ok := dataSet[key]
-	setMutex.RUnlock()
-	if !ok {
-		return resp.Value{DataType: resp.TypeNull, IsNull: true}
-	} else if record.ExpiryTime != nil {
-		if record.ExpiryTime.Before(time.Now()) {
-			delete(dataSet, key)
+	if record, ok := dataSet.Load(key); ok {
+		r := record.(Record)
+		if r.ExpiryTime != nil && r.ExpiryTime.Before(time.Now()) {
+			dataSet.Delete(key)
 			return resp.Value{DataType: resp.TypeNull, IsNull: true}
 		}
+		return resp.Value{DataType: resp.TypeBulk, Bulk: r.Value}
 	}
-	return resp.Value{DataType: resp.TypeString, Str: record.Value}
+	return resp.Value{DataType: resp.TypeNull, IsNull: true}
 }
 
 func handlePing(args []resp.Value) resp.Value {
