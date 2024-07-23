@@ -28,4 +28,5 @@ var CommandHandler = map[string]func([]resp.Value) resp.Value{
 	"EXISTS": handleExists,
 	"DEL":    handleDelete,
 	"INCR":   handleIncr,
+	"DECR":   handleDecr,
 }

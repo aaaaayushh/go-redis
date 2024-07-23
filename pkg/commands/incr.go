@@ -11,9 +11,9 @@ func handleIncr(args []resp.Value) resp.Value {
 	}
 	record, ok := dataSet.Load(args[0].Bulk)
 	if !ok {
-		record := Record{Value: "0"}
+		record := Record{Value: "1"}
 		dataSet.Store(args[0].Bulk, record)
-		return resp.Value{DataType: resp.TypeInteger, Num: 0}
+		return resp.Value{DataType: resp.TypeInteger, Num: 1}
 	} else {
 		incrValue, err := strconv.ParseInt(record.(Record).Value, 10, 64)
 		if err != nil {
