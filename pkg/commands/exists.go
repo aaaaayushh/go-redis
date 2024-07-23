@@ -11,9 +11,8 @@ func handleExists(args []resp.Value) resp.Value {
 	var result = 0
 	for _, arg := range args {
 		key := arg.Bulk
-		_, ok := dataSet.Load(key)
-		if ok {
-			result += 1
+		if _, ok := dataSet.Load(key); ok {
+			result++
 		}
 	}
 	return resp.Value{DataType: resp.TypeInteger, Num: result}

@@ -16,7 +16,15 @@ func handleGet(args []resp.Value) resp.Value {
 			dataSet.Delete(key)
 			return resp.Value{DataType: resp.TypeNull, IsNull: true}
 		}
-		return resp.Value{DataType: resp.TypeBulk, Bulk: r.Value}
+
+		switch r.Type {
+		case TypeString:
+			return resp.Value{DataType: resp.TypeBulk, Bulk: r.Value.(string)}
+		case TypeList, TypeSet, TypeZSet, TypeHash:
+			return resp.Value{DataType: resp.TypeError, Err: errWrongType}
+		default:
+			return resp.Value{DataType: resp.TypeError, Err: "ERR unknown data type"}
+		}
 	}
 	return resp.Value{DataType: resp.TypeNull, IsNull: true}
 }

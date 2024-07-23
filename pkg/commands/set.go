@@ -71,12 +71,12 @@ func handleSet(args []resp.Value) resp.Value {
 	key := args[0].Bulk
 	value := args[1].Bulk
 
-	opts, err := parseSetOptions(args)
+	opts, err := parseSetOptions(args[2:])
 	if err != nil {
 		return resp.Value{DataType: resp.TypeError, Err: err.Error()}
 	}
 
-	record := Record{Value: value}
+	record := Record{Type: TypeString, Value: value}
 
 	if opts.EX > 0 {
 		expirationTime := time.Now().Add(time.Duration(opts.EX) * time.Second)
@@ -94,8 +94,12 @@ func handleSet(args []resp.Value) resp.Value {
 		record.ExpiryTime = &expirationTime
 	}
 
-	_, exists := dataSet.Load(key)
-	if (opts.NX && exists) || (opts.XX && !exists) {
+	if oldRecord, exists := dataSet.Load(key); exists {
+		oldRec := oldRecord.(Record)
+		if opts.NX || (opts.XX && oldRec.Type != TypeString) {
+			return resp.Value{DataType: resp.TypeNull, IsNull: true}
+		}
+	} else if opts.XX {
 		return resp.Value{DataType: resp.TypeNull, IsNull: true}
 	}
 
